@@ -142,14 +142,14 @@ def main():
     # 1) Collect tasks with timeout
     tasks = []
     last_pl = ""
-    print("📥 Enter video URLs and playlist (URL or ID). Type 'done' to start.")
+    print("📥 Enter video URLs and playlist (URL or ID). Type 'vidu' to start.")
     while True:
         url = input_with_timeout("Video URL: ", IDLE_TIMEOUT)
         if url is None:
             print("\n⚠️ No input for 2 minutes—shutting down.")
             os._exit(0)
         url = url.strip()
-        if url.lower() == "done":
+        if url.lower() == "vidu":
             break
         if not url:
             continue
