@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-import os
-import re
-import time
-import pickle
+import os, re, time, pickle, sys, select
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -14,15 +11,26 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 # ---- Configuration ----
-SCOPES = [
+SCOPES             = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.force-ssl"
 ]
-TOKEN_FILES   = [f"token{i}.pickle" for i in range(1,5)]
-COOKIES_TXT   = Path("cookies.txt")
-MAX_WORKERS   = 10
-COOKIE_MAX_AGE= 7 * 24 * 3600  # 7 days
+TOKEN_FILES        = [f"token{i}.pickle" for i in range(1,5)]
+COOKIES_TXT        = Path("cookies.txt")
+MAX_WORKERS        = 35
+COOKIE_MAX_AGE     = 7 * 24 * 3600   # 7 days
+IDLE_TIMEOUT       = 120             # seconds to wait for input
+SHUTDOWN_DELAY     = 120             # seconds after tasks finish
 # ------------------------
+
+def input_with_timeout(prompt, timeout):
+    """Prompt the user, wait up to timeout secs for input, else return None."""
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    ready, _, _ = select.select([sys.stdin], [], [], timeout)
+    if ready:
+        return sys.stdin.readline().strip()
+    return None
 
 def warn_refresh_cookies():
     if COOKIES_TXT.exists():
@@ -72,7 +80,6 @@ def download_video(url):
         return ydl.prepare_filename(info), info.get("title","Untitled"), info.get("description","")
 
 def upload_video(path, title, description):
-    # Prepare initial request
     youtube = build("youtube", "v3", credentials=rotator.creds)
     body = {
         "snippet": {"title": title, "description": description, "categoryId": "22", "tags": []},
@@ -89,12 +96,10 @@ def upload_video(path, title, description):
                 print(f"    ↑ {int(status.progress()*100)}% {title}")
         except HttpError as e:
             err = str(e)
-            # Rotate on daily quota or lifetime upload limit
             if (e.resp.status == 403 and "quotaExceeded" in err) or \
                (e.resp.status == 400 and "uploadLimitExceeded" in err):
                 print("⚠️ Upload limit reached—rotating account and retrying...")
                 rotator.rotate()
-                # rebuild request with new credentials
                 youtube = build("youtube", "v3", credentials=rotator.creds)
                 req = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
                 continue
@@ -119,46 +124,61 @@ def add_to_playlist(video_id, playlist_id):
 
 def worker(task):
     url, playlist_input = task
-    playlist_id = extract_playlist_id(playlist_input) if playlist_input else ""
+    pid = extract_playlist_id(playlist_input) if playlist_input else ""
     try:
         print(f"⏬ Downloading: {url}")
         path, title, desc = download_video(url)
         print(f"✔ Downloaded: {path}")
         print(f"⏫ Uploading: {title}")
         vid = upload_video(path, title, desc)
-        if playlist_id:
-            add_to_playlist(vid, playlist_id)
+        if pid:
+            add_to_playlist(vid, pid)
     except Exception as e:
         print(f"❌ Error {url}: {e}")
 
 def main():
     warn_refresh_cookies()
 
+    # 1) Collect tasks with timeout
     tasks = []
     last_pl = ""
     print("📥 Enter video URLs and playlist (URL or ID). Type 'done' to start.")
     while True:
-        url = input("Video URL: ").strip()
-        if url.lower()=="done":
+        url = input_with_timeout("Video URL: ", IDLE_TIMEOUT)
+        if url is None:
+            print("\n⚠️ No input for 2 minutes—shutting down.")
+            os._exit(0)
+        url = url.strip()
+        if url.lower() == "done":
             break
         if not url:
             continue
-        raw_pl = input(f"Playlist (enter URL or ID) [Enter to reuse '{last_pl}']: ").strip()
+
+        raw_pl = input_with_timeout(f"Playlist (enter URL/ID) [Enter to reuse '{last_pl}']: ", IDLE_TIMEOUT)
+        if raw_pl is None:
+            print("\n⚠️ No input for 2 minutes—shutting down.")
+            os._exit(0)
+        raw_pl = raw_pl.strip()
         if raw_pl:
-            plid = extract_playlist_id(raw_pl)
-            last_pl = plid
-        else:
-            plid = last_pl
-        tasks.append((url, plid))
+            last_pl = extract_playlist_id(raw_pl)
+        tasks.append((url, last_pl))
 
     if not tasks:
         print("No tasks—exiting.")
         return
 
+    # 2) Run tasks
     print(f"\n🚀 Processing {len(tasks)} videos with {MAX_WORKERS} workers...\n")
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        for _ in ex.map(worker, tasks):
+        futures = [ex.submit(worker, t) for t in tasks]
+        for _ in as_completed(futures):
             pass
 
-if __name__=="__main__":
+    # 3) Auto‑shutdown after all tasks finish
+    print(f"\n🎉 All tasks completed. Shutting down in {SHUTDOWN_DELAY//60} minutes...")
+    time.sleep(SHUTDOWN_DELAY)
+    print("⏹ Shutting down now.")
+    os._exit(0)
+
+if __name__ == "__main__":
     main()
