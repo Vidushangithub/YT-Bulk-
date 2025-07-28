@@ -1,0 +1,25 @@
+name: Prebuild Dev Container
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  prebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Prebuild Codespace Dev Container
+        uses: devcontainers/ci@v0.3
+        with:
+          # Path to your devcontainer.json
+          devcontainer_path: .
+          # Use the Dockerfile in .devcontainer
+          dockerfile: ".devcontainer/Dockerfile"
+          # Build context is the repo root
+          context: .
+          github_token: ${{ secrets.GITHUB_TOKEN }}
