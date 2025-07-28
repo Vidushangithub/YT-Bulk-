@@ -1,0 +1,24 @@
+{
+  "name": "YouTube Bulk Transfer",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "mounts": [
+    "source=youtube_bulk_transfer_cache,target=/workspaces/youtube-bulk-transfer/.cache,type=volume",
+    "source=youtube_bulk_transfer_tokens,target=/workspaces/youtube-bulk-transfer/tokens,type=volume",
+    "source=pip_cache,target=/root/.cache/pip,type=volume",
+    "source=playwright_cache,target=/root/.cache/ms-playwright,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter"
+      ]
+    }
+  },
+  "forwardPorts": [8080],
+  "remoteUser": "vscode",
+  "postStartCommand": "echo \"history -s 'python3 -u youtube_transfer.py'\" >> ~/.bashrc"
+}
