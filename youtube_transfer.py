@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-import os, re, time, pickle, sys, select
+import os, re, time, pickle, subprocess, sys, select
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import yt_dlp
-from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
@@ -24,7 +24,6 @@ SHUTDOWN_DELAY     = 120             # seconds after tasks finish
 # ------------------------
 
 def input_with_timeout(prompt, timeout):
-    """Prompt the user, wait up to timeout secs for input, else return None."""
     sys.stdout.write(prompt)
     sys.stdout.flush()
     ready, _, _ = select.select([sys.stdin], [], [], timeout)
@@ -50,7 +49,6 @@ class AccountRotator:
         self.idx = 0
         self.creds = None
         self._load()
-
     def _load(self):
         tf = self.files[self.idx]
         if not os.path.exists(tf):
@@ -61,7 +59,6 @@ class AccountRotator:
             self.creds.refresh(Request())
             with open(tf, "wb") as fw:
                 pickle.dump(self.creds, fw)
-
     def rotate(self):
         self.idx = (self.idx + 1) % len(self.files)
         print(f"🔄 Switching to account #{self.idx+1}")
@@ -139,7 +136,7 @@ def worker(task):
 def main():
     warn_refresh_cookies()
 
-    # 1) Collect tasks with timeout
+    # 1) Collect tasks with idle timeout
     tasks = []
     last_pl = ""
     print("📥 Enter video URLs and playlist (URL or ID). Type 'vidu' to start.")
@@ -174,11 +171,25 @@ def main():
         for _ in as_completed(futures):
             pass
 
-    # 3) Auto‑shutdown after all tasks finish
-    print(f"\n🎉 All tasks completed. Shutting down in {SHUTDOWN_DELAY//60} minutes...")
+    # 3) Auto‑shutdown after idle delay
+    print(f"\n🎉 All tasks completed. Will attempt shutdown in {SHUTDOWN_DELAY//60} minutes...")
     time.sleep(SHUTDOWN_DELAY)
-    print("⏹ Shutting down now.")
+    print("⏹ Attempting to stop this Codespace via GitHub CLI...")
+    cs_name = os.environ.get("CODESPACE_NAME")
+    repo    = os.environ.get("GITHUB_REPOSITORY")
+    if cs_name and repo:
+        try:
+            subprocess.run([
+                "gh", "codespace", "stop", 
+                "--repo", repo, 
+                "--codespace", cs_name
+            ], check=True)
+            print(f"✅ Codespace '{cs_name}' stopped.")
+        except Exception as e:
+            print(f"❌ Failed to stop Codespace: {e}")
+    else:
+        print("⚠️ CODESPACE_NAME or GITHUB_REPOSITORY not set; cannot auto-stop.")
     os._exit(0)
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
