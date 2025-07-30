@@ -20,5 +20,6 @@
   },
   "forwardPorts": [8080],
   "remoteUser": "vscode",
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y gh && sudo rm -rf /var/lib/apt/lists/*",
   "postStartCommand": "echo \"history -s 'python3 -u youtube_transfer.py'\" >> ~/.bashrc"
 }
